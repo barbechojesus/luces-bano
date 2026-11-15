@@ -88,7 +88,7 @@
 </div>
 
 <div class="card">
-  <details><summary>Registro técnico (bytes enviados / recibidos)</summary><div id="log"></div></details>
+  <details id="det"><summary>Registro técnico (bytes enviados / recibidos)</summary><div id="log"></div></details>
 </div>
 
 <script>
@@ -112,8 +112,17 @@ const hex = a => [...new Uint8Array(a.buffer ?? a)].map(b=>b.toString(16).padSta
 function log(s){ const l=$("log"); l.textContent = s+"\n"+l.textContent.slice(0,4000); }
 
 // ===== Bluetooth =====
-async function conectar(f){
-  try {
+async function conectar(f, intentos = 4){
+  if (f.conectando) return;
+  f.conectando = true; pintarFocos();
+  for (let i = 1; i <= intentos && !f.ok; i++) {
+    try { await conectarUnaVez(f); }
+    catch(e) { log(`✗ ${f.nombre} (intento ${i}): ${e.message}`); await new Promise(r => setTimeout(r, 800 * i)); }
+  }
+  f.conectando = false; pintarFocos();
+}
+async function conectarUnaVez(f){
+  {
     const srv = await f.dev.gatt.connect();
     const s = await srv.getPrimaryService(SVC);
     f.ch = await s.getCharacteristic(WRITE);
@@ -123,9 +132,9 @@ async function conectar(f){
       n.addEventListener("characteristicvaluechanged", e => log(`← ${f.nombre}: ${hex(e.target.value)}`));
     } catch(e) {}
     f.ok = true;
+    log(`✓ ${f.nombre} conectado`);
     modoDesdeEnlace(f);
-  } catch(e) { f.ok = false; log(`✗ ${f.nombre}: ${e.message}`); }
-  pintarFocos();
+  }
 }
 
 // Enlace directo a un modo: …/luces-bano/#modo=Ducha  (para atajos en la pantalla de inicio)
@@ -142,9 +151,10 @@ function modoDesdeEnlace(f){
 addEventListener("hashchange", () => focos.filter(f=>f.ok).forEach(modoDesdeEnlace));
 
 function añadirDispositivo(dev){
-  if (focos.some(f => f.dev.id === dev.id)) return null;
+  const ya = focos.find(f => f.dev.id === dev.id);
+  if (ya) return ya;   // ya estaba: lo devolvemos para reconectarlo
   const f = { dev, nombre:`Foco ${focos.length+1}`, ch:null, ok:false, ocupado:false, pendiente:new Map() };
-  dev.addEventListener("gattserverdisconnected", () => { f.ok=false; pintarFocos(); setTimeout(()=>conectar(f), 1500); });
+  dev.addEventListener("gattserverdisconnected", () => { f.ok=false; pintarFocos(); log(`… ${f.nombre} desconectado`); setTimeout(()=>conectar(f), 1500); });
   focos.push(f);
   return f;
 }
@@ -156,22 +166,32 @@ $("btnAdd").onclick = async () => {
     const dev = await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: "RGB smart" }], optionalServices: [SVC] });
     const f = añadirDispositivo(dev);
-    if (f) await conectar(f);
+    f.ok = false; await conectar(f);
   } catch(e) { if (e.name !== "NotFoundError") $("aviso").textContent = e.message; }
 };
 
-$("btnReconnect").onclick = () => focos.filter(f=>!f.ok).forEach(conectar);
+$("btnReconnect").onclick = () => {
+  const caidos = focos.filter(f => !f.ok);
+  $("aviso").textContent = caidos.length ? `Reconectando ${caidos.length} foco(s)…` : "Todos conectados.";
+  caidos.forEach(f => conectar(f));
+};
 
 // Al recargar, recuperar los focos ya autorizados (si el navegador lo permite)
 (async () => {
   if (navigator.bluetooth?.getDevices) {
-    try { for (const d of await navigator.bluetooth.getDevices()) { const f = añadirDispositivo(d); if (f) conectar(f); } } catch(e) {}
+    try {
+      const ds = await navigator.bluetooth.getDevices();
+      ds.forEach(d => añadirDispositivo(d));
+      pintarFocos();
+      // de uno en uno: conectar varios a la vez al arrancar suele fallar
+      for (const f of focos) await conectar(f);
+    } catch(e) { log("getDevices: " + e.message); }
   }
   pintarFocos();
 })();
 
 function pintarFocos(){
-  $("focos").innerHTML = focos.map(f => `<span class="foco ${f.ok?"ok":""}">${f.nombre}</span>`).join("")
+  $("focos").innerHTML = focos.map(f => `<span class="foco ${f.ok?"ok":""}">${f.nombre}${f.conectando&&!f.ok?" …":""}</span>`).join("")
     || `<span class="sub">Ninguno todavía: pulsa “Añadir foco” una vez por cada foco.</span>`;
 }
 

@@ -145,7 +145,15 @@ async function conectar(f, intentos = 4){
   // si no hubo suerte, seguir probando en segundo plano mientras la página esté abierta
   if (!f.ok) setTimeout(() => conectar(f), 5000);
 }
-async function conectarUnaVez(f){
+// Cola global: Bluefy lleva mal varias conexiones en curso a la vez, así que van de una en una.
+let colaConexion = Promise.resolve();
+function conectarUnaVez(f){
+  const turno = colaConexion.then(() => conectarUnaVezReal(f));
+  colaConexion = turno.catch(() => {});
+  return turno;
+}
+async function conectarUnaVezReal(f){
+  if (f.ok) return;
   {
     log(`… ${f.nombre}: conectando (gatt.connected=${f.dev.gatt.connected})`);
     const srv = await f.dev.gatt.connect();

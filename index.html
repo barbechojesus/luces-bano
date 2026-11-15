@@ -109,6 +109,11 @@ const estado = { on:true, brillo:80, tipo:"blanco", kelvin:4000, tono:240 };
 const focos = [];            // { dev, ch, cola, ultimo, ok }
 const $ = id => document.getElementById(id);
 const hex = a => [...new Uint8Array(a.buffer ?? a)].map(b=>b.toString(16).padStart(2,"0")).join(" ");
+function detalle(e){
+  if (e == null) return String(e);
+  if (typeof e !== "object") return String(e);
+  return [e.name, e.message, e.code].filter(x => x !== undefined && x !== "").join(" · ") || JSON.stringify(e) || String(e);
+}
 function log(s){ const l=$("log"); l.textContent = s+"\n"+l.textContent.slice(0,4000); }
 
 // ===== Bluetooth =====
@@ -117,12 +122,17 @@ async function conectar(f, intentos = 4){
   f.conectando = true; pintarFocos();
   for (let i = 1; i <= intentos && !f.ok; i++) {
     try { await conectarUnaVez(f); }
-    catch(e) { log(`✗ ${f.nombre} (intento ${i}): ${e.message}`); await new Promise(r => setTimeout(r, 800 * i)); }
+    catch(e) {
+      log(`✗ ${f.nombre} (intento ${i}): ${detalle(e)}`);
+      try { f.dev.gatt.disconnect(); } catch(_) {}      // soltar una conexión colgada antes de reintentar
+      await new Promise(r => setTimeout(r, 1000 * i));
+    }
   }
   f.conectando = false; pintarFocos();
 }
 async function conectarUnaVez(f){
   {
+    log(`… ${f.nombre}: conectando (gatt.connected=${f.dev.gatt.connected})`);
     const srv = await f.dev.gatt.connect();
     const s = await srv.getPrimaryService(SVC);
     f.ch = await s.getCharacteristic(WRITE);

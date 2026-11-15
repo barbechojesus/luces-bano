@@ -129,6 +129,8 @@ async function conectar(f, intentos = 4){
     }
   }
   f.conectando = false; pintarFocos();
+  // si no hubo suerte, seguir probando en segundo plano mientras la página esté abierta
+  if (!f.ok) setTimeout(() => conectar(f), 5000);
 }
 async function conectarUnaVez(f){
   {

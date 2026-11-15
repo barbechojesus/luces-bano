@@ -176,6 +176,7 @@ async function conectarUnaVezReal(f){
 //   …/luces-bano/#encender       → enciende en modo Ducha
 let objetivo = null;
 function resolverEnlace(){
+  log(`i dirección recibida: ${location.href}`);
   // acepta #siguiente, #modo=X, #apagar  y también  ?a=siguiente, ?a=modo=X, ?a=apagar
   const q = new URLSearchParams(location.search).get("a");
   const h = q || decodeURIComponent(location.hash.slice(1));
@@ -199,6 +200,7 @@ function resolverEnlace(){
     $("aviso").textContent = objetivo.on === false ? "Apagando…" : objetivo.soloEncender ? "Encendiendo…" : `Modo: ${objetivo.nombre}`;
     focos.filter(f => f.ok).forEach(modoDesdeEnlace);
   }
+  log(objetivo ? `i orden del enlace: ${objetivo.on === false ? "apagar" : objetivo.nombre}` : "i el enlace no trae ninguna orden");
   // limpiar el enlace para que recargar no vuelva a rotar
   history.replaceState(null, "", location.pathname);
 }

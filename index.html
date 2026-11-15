@@ -173,7 +173,7 @@ async function conectarUnaVezReal(f){
 //   …/luces-bano/#modo=Ducha     → aplica ese modo
 //   …/luces-bano/#siguiente      → rota al modo siguiente de la lista
 //   …/luces-bano/#apagar         → apaga
-//   …/luces-bano/#encender       → enciende con el último color/brillo
+//   …/luces-bano/#encender       → enciende en modo Ducha
 let objetivo = null;
 function resolverEnlace(){
   // acepta #siguiente, #modo=X, #apagar  y también  ?a=siguiente, ?a=modo=X, ?a=apagar
@@ -183,7 +183,7 @@ function resolverEnlace(){
   if (!h) return;
   const modos = leerModos();
   if (h === "apagar") objetivo = { on:false };
-  else if (h === "encender") objetivo = { on:true, soloEncender:true };
+  else if (h === "encender") { const i = indiceEncender(modos); objetivo = modos[i]; recordarModo(i); }
   else if (h === "siguiente") {
     let i; try { i = (+localStorage.getItem("ultimoModo") + 1) % modos.length; } catch(e) { i = 0; }
     if (isNaN(i)) i = 0;
@@ -202,6 +202,9 @@ function resolverEnlace(){
   // limpiar el enlace para que recargar no vuelva a rotar
   history.replaceState(null, "", location.pathname);
 }
+// "Encender" siempre lleva al modo Ducha (o al primero de la lista si Ducha no existe)
+const MODO_AL_ENCENDER = "Ducha";
+function indiceEncender(modos){ const i = modos.findIndex(m => m.nombre.toLowerCase() === MODO_AL_ENCENDER.toLowerCase()); return i >= 0 ? i : 0; }
 function recordarModo(i){ try { localStorage.setItem("ultimoModo", i); } catch(e) {} }
 function modoDesdeEnlace(f){
   if (!objetivo) return;
@@ -288,7 +291,10 @@ function pintarControles(){
   $("tono").value = estado.tono;
   $("btnOn").classList.toggle("on", estado.on); $("btnOff").classList.toggle("on", !estado.on);
 }
-$("btnOn").onclick  = () => { estado.on = true;  pintarControles(); aplicar(); };
+$("btnOn").onclick  = () => {
+  const modos = leerModos(), i = indiceEncender(modos);
+  Object.assign(estado, modos[i]); estado.on = true; recordarModo(i); pintarControles(); aplicar();
+};
 $("btnOff").onclick = () => { estado.on = false; pintarControles(); enviar(cmd.off()); };
 $("brillo").oninput = e => { estado.brillo = +e.target.value; estado.on = true; pintarControles(); enviar(cmd.brillo(estado.brillo)); };
 $("kelvin").oninput = e => { estado.kelvin = +e.target.value; estado.tipo = "blanco"; pintarControles(); enviar(cmd.blanco(estado.kelvin)); };

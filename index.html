@@ -173,6 +173,7 @@ async function conectarUnaVezReal(f){
 //   …/luces-bano/#modo=Ducha     → aplica ese modo
 //   …/luces-bano/#siguiente      → rota al modo siguiente de la lista
 //   …/luces-bano/#apagar         → apaga
+//   …/luces-bano/#encender       → enciende con el último color/brillo
 let objetivo = null;
 function resolverEnlace(){
   // acepta #siguiente, #modo=X, #apagar  y también  ?a=siguiente, ?a=modo=X, ?a=apagar
@@ -182,6 +183,7 @@ function resolverEnlace(){
   if (!h) return;
   const modos = leerModos();
   if (h === "apagar") objetivo = { on:false };
+  else if (h === "encender") objetivo = { on:true, soloEncender:true };
   else if (h === "siguiente") {
     let i; try { i = (+localStorage.getItem("ultimoModo") + 1) % modos.length; } catch(e) { i = 0; }
     if (isNaN(i)) i = 0;
@@ -192,8 +194,9 @@ function resolverEnlace(){
     if (i >= 0) { objetivo = modos[i]; recordarModo(i); }
   }
   if (objetivo) {
-    Object.assign(estado, objetivo); pintarControles();
-    $("aviso").textContent = objetivo.on === false ? "Apagando…" : `Modo: ${objetivo.nombre}`;
+    if (!objetivo.soloEncender) Object.assign(estado, objetivo);
+    estado.on = objetivo.on; pintarControles();
+    $("aviso").textContent = objetivo.on === false ? "Apagando…" : objetivo.soloEncender ? "Encendiendo…" : `Modo: ${objetivo.nombre}`;
     focos.filter(f => f.ok).forEach(modoDesdeEnlace);
   }
   // limpiar el enlace para que recargar no vuelva a rotar
@@ -202,7 +205,7 @@ function resolverEnlace(){
 function recordarModo(i){ try { localStorage.setItem("ultimoModo", i); } catch(e) {} }
 function modoDesdeEnlace(f){
   if (!objetivo) return;
-  const b = estado.on ? [cmd.on(), estado.tipo==="color"?cmd.color(estado.tono):cmd.blanco(estado.kelvin), cmd.brillo(estado.brillo)] : [cmd.off()];
+  const b = objetivo.soloEncender ? [cmd.on()] : estado.on ? [cmd.on(), estado.tipo==="color"?cmd.color(estado.tono):cmd.blanco(estado.kelvin), cmd.brillo(estado.brillo)] : [cmd.off()];
   b.forEach(x => f.pendiente.set(x[2], x)); bombear(f);
 }
 addEventListener("hashchange", resolverEnlace);

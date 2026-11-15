@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111114">
+<title>Luces del baño</title>
+<style>
+  :root { --bg:#111114; --card:#1c1c22; --txt:#f2f2f5; --sub:#9a9aa6; --acc:#ffb547; --ok:#3ddc84; --bad:#ff5c5c; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:16px/1.4 -apple-system, system-ui, sans-serif;
+         padding:16px 16px calc(24px + env(safe-area-inset-bottom)); max-width:520px; margin-inline:auto; }
+  h1 { font-size:26px; margin:8px 0 2px; }
+  .sub { color:var(--sub); font-size:14px; }
+  .card { background:var(--card); border-radius:18px; padding:16px; margin-top:14px; }
+  .card h2 { font-size:15px; color:var(--sub); font-weight:600; margin:0 0 12px; text-transform:uppercase; letter-spacing:.04em; }
+  button { font:inherit; color:var(--txt); background:#2a2a33; border:0; border-radius:14px; padding:14px; cursor:pointer; }
+  button:active { transform:scale(.97); }
+  button:disabled { opacity:.4; }
+  .row { display:flex; gap:10px; }
+  .row > * { flex:1; }
+  .big { font-size:18px; font-weight:600; padding:18px; }
+  .on { background:var(--acc); color:#111; }
+  .focos { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .foco { font-size:13px; padding:6px 10px; border-radius:999px; background:#2a2a33; }
+  .foco::before { content:"●"; margin-right:6px; color:var(--bad); }
+  .foco.ok::before { color:var(--ok); }
+  input[type=range] { width:100%; -webkit-appearance:none; appearance:none; height:34px; border-radius:17px; outline:none; margin:4px 0 12px; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:30px; height:30px; border-radius:50%; background:#fff; box-shadow:0 1px 4px #0008; }
+  #brillo { background:linear-gradient(90deg,#333,#fff); }
+  #kelvin { background:linear-gradient(90deg,#ff9b3d,#fff3e0,#cfe3ff); }
+  #tono { background:linear-gradient(90deg,red,#ff0,lime,cyan,blue,#f0f,red); }
+  .lbl { display:flex; justify-content:space-between; color:var(--sub); font-size:14px; }
+  .modos { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+  .modo { text-align:left; padding:14px; position:relative; }
+  .modo b { display:block; }
+  .modo small { color:var(--sub); }
+  .modo .x { position:absolute; top:6px; right:10px; color:var(--sub); font-size:18px; padding:4px; }
+  .muestra { display:inline-block; width:12px; height:12px; border-radius:50%; margin-right:6px; vertical-align:-1px; }
+  #aviso { color:var(--bad); font-size:14px; margin-top:8px; }
+  #log { font:12px ui-monospace, Menlo, monospace; color:var(--sub); white-space:pre-wrap; max-height:140px; overflow:auto; }
+  details summary { color:var(--sub); font-size:14px; cursor:pointer; }
+</style>
+</head>
+<body>
+<h1>Luces del baño</h1>
+<div class="sub">Focos Inspire EXTRAFLAT · Bluetooth directo desde el móvil</div>
+
+<div class="card">
+  <h2>Focos</h2>
+  <div class="row">
+    <button id="btnAdd" class="big">＋ Añadir foco</button>
+    <button id="btnReconnect">Reconectar</button>
+  </div>
+  <div class="focos" id="focos"></div>
+  <div id="aviso"></div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <button id="btnOn" class="big on">Encender</button>
+    <button id="btnOff" class="big">Apagar</button>
+  </div>
+  <div style="margin-top:16px">
+    <div class="lbl"><span>Brillo</span><span id="vBrillo">80 %</span></div>
+    <input type="range" id="brillo" min="1" max="100" value="80">
+  </div>
+</div>
+
+<div class="card">
+  <h2>Blancos</h2>
+  <div class="lbl"><span>Cálido</span><span id="vKelvin">4000 K</span><span>Frío</span></div>
+  <input type="range" id="kelvin" min="2700" max="6500" step="100" value="4000">
+  <h2 style="margin-top:6px">Colores</h2>
+  <input type="range" id="tono" min="0" max="359" value="240">
+  <div class="row">
+    <button data-h="0" style="color:#ff5555">Rojo</button>
+    <button data-h="120" style="color:#55ff77">Verde</button>
+    <button data-h="240" style="color:#6699ff">Azul</button>
+    <button data-h="285" style="color:#d070ff">Morado</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Modos</h2>
+  <div class="modos" id="modos"></div>
+  <button id="btnGuardar" style="width:100%;margin-top:12px">💾 Guardar lo actual como modo…</button>
+</div>
+
+<div class="card">
+  <details><summary>Registro técnico (bytes enviados / recibidos)</summary><div id="log"></div></details>
+</div>
+
+<script>
+// ===== Protocolo (descubierto el 15/11/2026, ver luz.py) =====
+const SVC    = "0000a100-1115-1000-0001-617573746f6d";
+const WRITE  = "0000a101-1115-1000-0001-617573746f6d";
+const NOTIFY = "0000a102-1115-1000-0001-617573746f6d";
+const cmd = {
+  on:     () => [0,0,0x10,1,3,1,0,1],
+  off:    () => [0,0,0x10,1,3,0,0,1],
+  brillo: p  => [0,0,0x11,1,3,Math.max(1,Math.min(254,Math.round(p*254/100))),0,1],
+  blanco: k  => { const m = Math.round(1e6/k); return [0,0,0x12,1,4,m>>8,m&255,0,0]; },
+  color:  h  => [0,0,0x13,7,4,Math.round((h%360)*254/360),0xfe,0,0],
+};
+
+// ===== Estado =====
+const estado = { on:true, brillo:80, tipo:"blanco", kelvin:4000, tono:240 };
+const focos = [];            // { dev, ch, cola, ultimo, ok }
+const $ = id => document.getElementById(id);
+const hex = a => [...new Uint8Array(a.buffer ?? a)].map(b=>b.toString(16).padStart(2,"0")).join(" ");
+function log(s){ const l=$("log"); l.textContent = s+"\n"+l.textContent.slice(0,4000); }
+
+// ===== Bluetooth =====
+async function conectar(f){
+  try {
+    const srv = await f.dev.gatt.connect();
+    const s = await srv.getPrimaryService(SVC);
+    f.ch = await s.getCharacteristic(WRITE);
+    try {
+      const n = await s.getCharacteristic(NOTIFY);
+      await n.startNotifications();
+      n.addEventListener("characteristicvaluechanged", e => log(`← ${f.nombre}: ${hex(e.target.value)}`));
+    } catch(e) {}
+    f.ok = true;
+  } catch(e) { f.ok = false; log(`✗ ${f.nombre}: ${e.message}`); }
+  pintarFocos();
+}
+
+function añadirDispositivo(dev){
+  if (focos.some(f => f.dev.id === dev.id)) return null;
+  const f = { dev, nombre:`Foco ${focos.length+1}`, ch:null, ok:false, ocupado:false, pendiente:new Map() };
+  dev.addEventListener("gattserverdisconnected", () => { f.ok=false; pintarFocos(); setTimeout(()=>conectar(f), 1500); });
+  focos.push(f);
+  return f;
+}
+
+$("btnAdd").onclick = async () => {
+  $("aviso").textContent = "";
+  if (!navigator.bluetooth) { $("aviso").textContent = "Este navegador no tiene Bluetooth web. Abre la página en Bluefy."; return; }
+  try {
+    const dev = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: "RGB smart" }], optionalServices: [SVC] });
+    const f = añadirDispositivo(dev);
+    if (f) await conectar(f);
+  } catch(e) { if (e.name !== "NotFoundError") $("aviso").textContent = e.message; }
+};
+
+$("btnReconnect").onclick = () => focos.filter(f=>!f.ok).forEach(conectar);
+
+// Al recargar, recuperar los focos ya autorizados (si el navegador lo permite)
+(async () => {
+  if (navigator.bluetooth?.getDevices) {
+    try { for (const d of await navigator.bluetooth.getDevices()) { const f = añadirDispositivo(d); if (f) conectar(f); } } catch(e) {}
+  }
+  pintarFocos();
+})();
+
+function pintarFocos(){
+  $("focos").innerHTML = focos.map(f => `<span class="foco ${f.ok?"ok":""}">${f.nombre}</span>`).join("")
+    || `<span class="sub">Ninguno todavía: pulsa “Añadir foco” una vez por cada foco.</span>`;
+}
+
+// Cola por foco: cada tipo de orden (10/11/12/13) solo guarda la última pendiente.
+// Así, al arrastrar un deslizador no se acumulan cientos de órdenes.
+function enviar(bytes){
+  for (const f of focos) { f.pendiente.set(bytes[2], bytes); bombear(f); }
+}
+async function bombear(f){
+  if (f.ocupado || !f.ok) return;
+  f.ocupado = true;
+  try {
+    while (f.pendiente.size) {
+      const [k, b] = f.pendiente.entries().next().value;
+      f.pendiente.delete(k);
+      log(`→ ${f.nombre}: ${hex(new Uint8Array(b))}`);
+      await f.ch.writeValueWithResponse(new Uint8Array(b));
+    }
+  } catch(e) { log(`✗ ${f.nombre}: ${e.message}`); }
+  f.ocupado = false;
+}
+
+// ===== Controles =====
+function aplicar(e = estado){
+  if (!e.on) { enviar(cmd.off()); return; }
+  enviar(cmd.on());
+  enviar(e.tipo === "color" ? cmd.color(e.tono) : cmd.blanco(e.kelvin));
+  enviar(cmd.brillo(e.brillo));
+}
+function pintarControles(){
+  $("brillo").value = estado.brillo; $("vBrillo").textContent = estado.brillo + " %";
+  $("kelvin").value = estado.kelvin; $("vKelvin").textContent = estado.kelvin + " K";
+  $("tono").value = estado.tono;
+  $("btnOn").classList.toggle("on", estado.on); $("btnOff").classList.toggle("on", !estado.on);
+}
+$("btnOn").onclick  = () => { estado.on = true;  pintarControles(); aplicar(); };
+$("btnOff").onclick = () => { estado.on = false; pintarControles(); enviar(cmd.off()); };
+$("brillo").oninput = e => { estado.brillo = +e.target.value; estado.on = true; pintarControles(); enviar(cmd.brillo(estado.brillo)); };
+$("kelvin").oninput = e => { estado.kelvin = +e.target.value; estado.tipo = "blanco"; pintarControles(); enviar(cmd.blanco(estado.kelvin)); };
+$("tono").oninput   = e => { estado.tono = +e.target.value; estado.tipo = "color"; pintarControles(); enviar(cmd.color(estado.tono)); };
+document.querySelectorAll("[data-h]").forEach(b => b.onclick = () => {
+  estado.tono = +b.dataset.h; estado.tipo = "color"; estado.on = true; pintarControles(); enviar(cmd.on()); enviar(cmd.color(estado.tono));
+});
+
+// ===== Modos memorizados (se guardan en este móvil) =====
+const MODOS_INICIALES = [
+  { nombre:"Ducha",   on:true, brillo:100, tipo:"blanco", kelvin:6000, tono:0 },
+  { nombre:"Relax",   on:true, brillo:30,  tipo:"blanco", kelvin:2700, tono:0 },
+  { nombre:"Noche",   on:true, brillo:3,   tipo:"color",  kelvin:2700, tono:25 },
+  { nombre:"Fiesta",  on:true, brillo:80,  tipo:"color",  kelvin:4000, tono:285 },
+];
+function leerModos(){ try { return JSON.parse(localStorage.getItem("modos")) || MODOS_INICIALES; } catch(e) { return MODOS_INICIALES; } }
+function guardarModos(m){ try { localStorage.setItem("modos", JSON.stringify(m)); } catch(e) {} }
+function muestra(m){ return m.tipo === "color" ? `hsl(${m.tono},100%,55%)` : (m.kelvin < 3500 ? "#ffb35c" : m.kelvin < 5000 ? "#fff1d6" : "#d6e6ff"); }
+function pintarModos(){
+  const modos = leerModos();
+  $("modos").innerHTML = modos.map((m,i) => `
+    <button class="modo" data-i="${i}">
+      <span class="x" data-del="${i}">×</span>
+      <b><span class="muestra" style="background:${muestra(m)}"></span>${m.nombre}</b>
+      <small>${m.tipo === "color" ? "Color" : m.kelvin+" K"} · ${m.brillo} %</small>
+    </button>`).join("");
+  $("modos").querySelectorAll(".modo").forEach(b => b.onclick = ev => {
+    if (ev.target.dataset.del !== undefined) {
+      if (confirm(`¿Borrar el modo “${modos[ev.target.dataset.del].nombre}”?`)) { modos.splice(+ev.target.dataset.del, 1); guardarModos(modos); pintarModos(); }
+      return;
+    }
+    Object.assign(estado, modos[+b.dataset.i]); pintarControles(); aplicar();
+  });
+}
+$("btnGuardar").onclick = () => {
+  const nombre = prompt("Nombre del modo (p. ej. Afeitado, Baño largo…):");
+  if (!nombre) return;
+  const modos = leerModos(); modos.push({ ...estado, nombre }); guardarModos(modos); pintarModos();
+};
+
+pintarControles(); pintarModos();
+</script>
+</body>
+</html>

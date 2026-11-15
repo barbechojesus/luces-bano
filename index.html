@@ -88,6 +88,7 @@
 </div>
 
 <div class="card">
+  <button id="btnCompartir" style="width:100%;margin-bottom:10px">📤 Compartir registro</button>
   <details id="det"><summary>Registro técnico (bytes enviados / recibidos)</summary><div id="log"></div></details>
 </div>
 
@@ -114,7 +115,7 @@ function detalle(e){
   if (typeof e !== "object") return String(e);
   return [e.name, e.message, e.code].filter(x => x !== undefined && x !== "").join(" · ") || JSON.stringify(e) || String(e);
 }
-function log(s){ const l=$("log"); l.textContent = s+"\n"+l.textContent.slice(0,4000); }
+function log(s){ const l=$("log"); l.textContent = s+"\n"+l.textContent.slice(0,20000); }
 
 // ===== Bluetooth =====
 // Escuchar los anuncios del foco: cuando "habla", es el momento de conectar.
@@ -301,6 +302,15 @@ $("btnGuardar").onclick = () => {
   const modos = leerModos(); modos.push({ ...estado, nombre }); guardarModos(modos); pintarModos();
 };
 
+$("btnCompartir").onclick = async () => {
+  const estadoFocos = focos.map(f => `${f.nombre}: ${f.ok ? "conectado" : "SIN conexión"}`).join("\n");
+  const texto = `Luces del baño · ${new Date().toLocaleString("es-ES")}\n${navigator.userAgent}\n\n${estadoFocos}\n\nRegistro (lo más nuevo arriba):\n${$("log").textContent}`;
+  try {
+    if (navigator.share) { await navigator.share({ title: "Registro luces", text: texto }); return; }
+  } catch(e) { if (e.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(texto); $("aviso").textContent = "Registro copiado al portapapeles."; }
+  catch(e) { $("det").open = true; $("aviso").textContent = "No se pudo compartir: abre el registro y cópialo a mano."; }
+};
 pintarControles(); pintarModos();
 </script>
 </body>

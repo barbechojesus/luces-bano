@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#111114">
+<title>Puente de luces</title>
+<style>
+  :root { --bg:#111114; --card:#1c1c22; --txt:#f2f2f5; --sub:#9a9aa6; --ok:#3ddc84; --bad:#ff5c5c; --acc:#ffb547; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:16px/1.4 system-ui, sans-serif; padding:16px; max-width:720px; margin-inline:auto; }
+  h1 { font-size:24px; margin:4px 0; }
+  .sub { color:var(--sub); font-size:14px; }
+  .card { background:var(--card); border-radius:16px; padding:16px; margin-top:12px; }
+  button { font:inherit; color:var(--txt); background:#2a2a33; border:0; border-radius:12px; padding:14px 18px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  .foco { padding:6px 12px; border-radius:999px; background:#2a2a33; font-size:14px; }
+  .foco::before { content:"●"; margin-right:6px; color:var(--bad); }
+  .foco.ok::before { color:var(--ok); }
+  #estado { font-size:20px; font-weight:600; }
+  #log { font:12px ui-monospace, monospace; color:var(--sub); white-space:pre-wrap; max-height:45vh; overflow:auto; }
+  code { background:#2a2a33; padding:2px 6px; border-radius:6px; word-break:break-all; }
+</style>
+</head>
+<body>
+<h1>Puente de luces</h1>
+<div class="sub">Esta tablet recibe órdenes por internet y se las pasa a los focos por Bluetooth. Déjala enchufada y con esta página abierta.</div>
+
+<div class="card">
+  <div id="estado">Arrancando…</div>
+  <div class="row" style="margin-top:10px" id="focos"></div>
+  <div class="row" style="margin-top:12px">
+    <button id="btnAdd">＋ Añadir foco</button>
+    <button id="btnPrueba">Probar: siguiente modo</button>
+  </div>
+  <p class="sub" id="canalInfo"></p>
+</div>
+
+<div class="card"><div id="log"></div></div>
+
+<script>
+// ===== Protocolo de los focos (ver luz.py) =====
+const SVC    = "0000a100-1115-1000-0001-617573746f6d";
+const WRITE  = "0000a101-1115-1000-0001-617573746f6d";
+const NOTIFY = "0000a102-1115-1000-0001-617573746f6d";
+const cmd = {
+  on:     () => [0,0,0x10,1,3,1,0,1],
+  off:    () => [0,0,0x10,1,3,0,0,1],
+  brillo: p  => [0,0,0x11,1,3,Math.max(1,Math.min(254,Math.round(p*254/100))),0,1],
+  blanco: k  => { const m = Math.round(1e6/k); return [0,0,0x12,1,4,m>>8,m&255,0,0]; },
+  color:  h  => [0,0,0x13,7,4,Math.round((h%360)*254/360),0xfe,0,0],
+};
+const MODOS = [
+  { nombre:"Ducha",  brillo:100, tipo:"blanco", kelvin:6000 },
+  { nombre:"Relax",  brillo:30,  tipo:"blanco", kelvin:2700 },
+  { nombre:"Noche",  brillo:3,   tipo:"color",  tono:25 },
+  { nombre:"Fiesta", brillo:80,  tipo:"color",  tono:285 },
+];
+const MODO_AL_ENCENDER = "Ducha";
+
+const $ = id => document.getElementById(id);
+const hex = a => [...a].map(b=>b.toString(16).padStart(2,"0")).join(" ");
+function log(s){ const l=$("log"); l.textContent = new Date().toLocaleTimeString("es-ES")+" "+s+"\n"+l.textContent.slice(0,20000); }
+function detalle(e){ return e && typeof e === "object" ? [e.name, e.message].filter(Boolean).join(": ") : String(e); }
+
+// ===== Canal de órdenes (ntfy.sh). El nombre secreto va en la dirección: puente.html#canal=XXXX =====
+const canal = new URLSearchParams(location.hash.slice(1)).get("canal");
+
+// ===== Focos =====
+const focos = [];
+function añadirDispositivo(dev){
+  let f = focos.find(x => x.dev.id === dev.id);
+  if (f) return f;
+  f = { dev, nombre:`Foco ${focos.length+1}`, ch:null, ok:false, conectando:false, pendiente:new Map(), ocupado:false };
+  dev.addEventListener("gattserverdisconnected", () => { f.ok=false; pintar(); log(`… ${f.nombre} desconectado`); programar(f, 1500); });
+  focos.push(f);
+  return f;
+}
+function programar(f, ms){ clearTimeout(f.t); f.t = setTimeout(() => conectar(f), ms); }
+let cola = Promise.resolve();
+function conectar(f){
+  if (f.ok || f.conectando) return;
+  f.conectando = true;
+  cola = cola.then(async () => {
+    try {
+      const srv = await f.dev.gatt.connect();
+      const s = await srv.getPrimaryService(SVC);
+      f.ch = await s.getCharacteristic(WRITE);
+      try { const n = await s.getCharacteristic(NOTIFY); await n.startNotifications(); } catch(e) {}
+      f.ok = true; log(`✓ ${f.nombre} conectado`); bombear(f);
+    } catch(e) {
+      log(`✗ ${f.nombre}: ${detalle(e)}`);
+      try { f.dev.gatt.disconnect(); } catch(_) {}
+    }
+    f.conectando = false; pintar();
+    if (!f.ok) programar(f, 8000);
+  });
+}
+function enviar(b){ for (const f of focos) { f.pendiente.set(b[2], b); bombear(f); } }
+async function bombear(f){
+  if (f.ocupado || !f.ok) return;
+  f.ocupado = true;
+  try {
+    while (f.pendiente.size) {
+      const [k, b] = f.pendiente.entries().next().value;
+      f.pendiente.delete(k);
+      await f.ch.writeValueWithResponse(new Uint8Array(b));
+    }
+  } catch(e) { log(`✗ ${f.nombre} al escribir: ${detalle(e)}`); }
+  f.ocupado = false;
+}
+function aplicarModo(m){
+  enviar(cmd.on());
+  enviar(m.tipo === "color" ? cmd.color(m.tono) : cmd.blanco(m.kelvin));
+  enviar(cmd.brillo(m.brillo));
+}
+
+// ===== Órdenes: siguiente | encender | apagar | modo=Nombre =====
+function leerUltimo(){ try { return +localStorage.getItem("ultimoModo") || 0; } catch(e) { return 0; } }
+function guardarUltimo(i){ try { localStorage.setItem("ultimoModo", i); } catch(e) {} }
+function orden(texto){
+  const t = (texto || "").trim().toLowerCase();
+  let i = -1;
+  if (t === "apagar") { enviar(cmd.off()); estado("Apagado"); log("⇢ apagar"); return; }
+  if (t === "siguiente") i = (leerUltimo() + 1) % MODOS.length;
+  else if (t === "encender") i = MODOS.findIndex(m => m.nombre.toLowerCase() === MODO_AL_ENCENDER.toLowerCase());
+  else if (t.startsWith("modo=")) i = MODOS.findIndex(m => m.nombre.toLowerCase() === t.slice(5));
+  if (i < 0) { log(`? orden desconocida: "${texto}"`); return; }
+  guardarUltimo(i); aplicarModo(MODOS[i]); estado(`Modo ${MODOS[i].nombre}`); log(`⇢ ${t} → ${MODOS[i].nombre}`);
+}
+
+function escucharCanal(){
+  if (!canal) { $("canalInfo").innerHTML = "⚠️ Falta el canal: abre esta página con <code>#canal=…</code> al final."; return; }
+  $("canalInfo").innerHTML = `Escuchando órdenes en el canal secreto (${canal.length} caracteres).`;
+  const es = new EventSource(`https://ntfy.sh/${encodeURIComponent(canal)}/sse`);
+  es.onopen = () => log("✓ canal de órdenes conectado");
+  es.onerror = () => log("… canal de órdenes: reconectando");
+  es.onmessage = ev => { try { const m = JSON.parse(ev.data); if (m.event === "message") orden(m.message); } catch(e) {} };
+}
+
+// ===== Pantalla siempre encendida =====
+let wake = null;
+async function mantenerDespierta(){
+  try { wake = await navigator.wakeLock?.request("screen"); log("✓ pantalla bloqueada encendida"); } catch(e) { log("i sin wakeLock: activa 'Pantalla activa' en Opciones de desarrollador"); }
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") mantenerDespierta(); });
+
+// ===== Interfaz =====
+function estado(s){ $("estado").textContent = s; }
+function pintar(){
+  $("focos").innerHTML = focos.map(f => `<span class="foco ${f.ok?"ok":""}">${f.nombre}</span>`).join("") || `<span class="sub">Pulsa “Añadir foco” una vez por cada foco.</span>`;
+  const n = focos.filter(f => f.ok).length;
+  if ($("estado").textContent === "Arrancando…" || /focos conectados/.test($("estado").textContent)) estado(`${n} de ${focos.length} focos conectados`);
+}
+$("btnAdd").onclick = async () => {
+  if (!navigator.bluetooth) { log("✗ Este navegador no tiene Bluetooth web. Usa Chrome."); return; }
+  try {
+    const dev = await navigator.bluetooth.requestDevice({ filters:[{ namePrefix:"RGB smart" }], optionalServices:[SVC] });
+    conectar(añadirDispositivo(dev)); pintar();
+  } catch(e) { if (e.name !== "NotFoundError") log(`✗ ${detalle(e)}`); }
+};
+$("btnPrueba").onclick = () => orden("siguiente");
+
+(async () => {
+  pintar(); escucharCanal(); mantenerDespierta();
+  if (navigator.bluetooth?.getDevices) {
+    try { for (const d of await navigator.bluetooth.getDevices()) conectar(añadirDispositivo(d)); pintar(); } catch(e) {}
+  }
+})();
+</script>
+</body>
+</html>

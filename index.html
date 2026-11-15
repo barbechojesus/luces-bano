@@ -169,18 +169,41 @@ async function conectarUnaVezReal(f){
   }
 }
 
-// Enlace directo a un modo: …/luces-bano/#modo=Ducha  (para atajos en la pantalla de inicio)
+// Enlaces directos (para Atajos / pantalla de inicio):
+//   …/luces-bano/#modo=Ducha     → aplica ese modo
+//   …/luces-bano/#siguiente      → rota al modo siguiente de la lista
+//   …/luces-bano/#apagar         → apaga
+let objetivo = null;
+function resolverEnlace(){
+  const h = decodeURIComponent(location.hash.slice(1));
+  objetivo = null;
+  if (!h) return;
+  const modos = leerModos();
+  if (h === "apagar") objetivo = { on:false };
+  else if (h === "siguiente") {
+    let i; try { i = (+localStorage.getItem("ultimoModo") + 1) % modos.length; } catch(e) { i = 0; }
+    if (isNaN(i)) i = 0;
+    objetivo = modos[i]; recordarModo(i);
+  } else {
+    const n = (h.match(/modo=(.+)/) || [])[1];
+    const i = modos.findIndex(x => x.nombre.toLowerCase() === (n || "").toLowerCase());
+    if (i >= 0) { objetivo = modos[i]; recordarModo(i); }
+  }
+  if (objetivo) {
+    Object.assign(estado, objetivo); pintarControles();
+    $("aviso").textContent = objetivo.on === false ? "Apagando…" : `Modo: ${objetivo.nombre}`;
+    focos.filter(f => f.ok).forEach(modoDesdeEnlace);
+  }
+  // limpiar el enlace para que recargar no vuelva a rotar
+  history.replaceState(null, "", location.pathname);
+}
+function recordarModo(i){ try { localStorage.setItem("ultimoModo", i); } catch(e) {} }
 function modoDesdeEnlace(f){
-  const nombre = decodeURIComponent((location.hash.match(/modo=([^&]+)/) || [])[1] || "");
-  if (!nombre) return;
-  const m = leerModos().find(x => x.nombre.toLowerCase() === nombre.toLowerCase());
-  if (!m) return;
-  Object.assign(estado, m); pintarControles();
-  // se aplica a cada foco según se va conectando
+  if (!objetivo) return;
   const b = estado.on ? [cmd.on(), estado.tipo==="color"?cmd.color(estado.tono):cmd.blanco(estado.kelvin), cmd.brillo(estado.brillo)] : [cmd.off()];
   b.forEach(x => f.pendiente.set(x[2], x)); bombear(f);
 }
-addEventListener("hashchange", () => focos.filter(f=>f.ok).forEach(modoDesdeEnlace));
+addEventListener("hashchange", resolverEnlace);
 
 function añadirDispositivo(dev){
   const ya = focos.find(f => f.dev.id === dev.id);
@@ -292,7 +315,7 @@ function pintarModos(){
       if (confirm(`¿Borrar el modo “${modos[ev.target.dataset.del].nombre}”?`)) { modos.splice(+ev.target.dataset.del, 1); guardarModos(modos); pintarModos(); }
       return;
     }
-    Object.assign(estado, modos[+b.dataset.i]); pintarControles(); aplicar();
+    Object.assign(estado, modos[+b.dataset.i]); recordarModo(+b.dataset.i); pintarControles(); aplicar();
   });
 }
 $("btnGuardar").onclick = () => {
@@ -310,7 +333,7 @@ $("btnCompartir").onclick = async () => {
   try { await navigator.clipboard.writeText(texto); $("aviso").textContent = "Registro copiado al portapapeles."; }
   catch(e) { $("det").open = true; $("aviso").textContent = "No se pudo compartir: abre el registro y cópialo a mano."; }
 };
-pintarControles(); pintarModos();
+pintarControles(); pintarModos(); resolverEnlace();
 </script>
 </body>
 </html>

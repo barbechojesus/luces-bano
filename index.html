@@ -175,7 +175,9 @@ async function conectarUnaVezReal(f){
 //   …/luces-bano/#apagar         → apaga
 let objetivo = null;
 function resolverEnlace(){
-  const h = decodeURIComponent(location.hash.slice(1));
+  // acepta #siguiente, #modo=X, #apagar  y también  ?a=siguiente, ?a=modo=X, ?a=apagar
+  const q = new URLSearchParams(location.search).get("a");
+  const h = q || decodeURIComponent(location.hash.slice(1));
   objetivo = null;
   if (!h) return;
   const modos = leerModos();

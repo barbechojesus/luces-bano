@@ -88,6 +88,13 @@
 </div>
 
 <div class="card">
+  <details id="detAtajos"><summary>🔗 Enlaces para Atajos (copiar y pegar)</summary>
+    <p class="sub">En Atajos: acción <b>“Abrir URL”</b> → pega el enlace. No lo escribas a mano.</p>
+    <div id="atajos"></div>
+  </details>
+</div>
+
+<div class="card">
   <button id="btnCompartir" style="width:100%;margin-bottom:10px">📤 Compartir registro</button>
   <details id="det"><summary>Registro técnico (bytes enviados / recibidos)</summary><div id="log"></div></details>
 </div>
@@ -346,6 +353,29 @@ $("btnCompartir").onclick = async () => {
   try { await navigator.clipboard.writeText(texto); $("aviso").textContent = "Registro copiado al portapapeles."; }
   catch(e) { $("det").open = true; $("aviso").textContent = "No se pudo compartir: abre el registro y cópialo a mano."; }
 };
+// ===== Enlaces para la app Atajos: bluefy://open?url=<dirección codificada> =====
+function enlaceAtajo(accion){
+  const web = location.origin + location.pathname + "?a=" + encodeURIComponent(accion);
+  return "bluefy://open?url=" + encodeURIComponent(web);
+}
+function pintarAtajos(){
+  const lista = [["Encender (modo Ducha)","encender"],["Apagar","apagar"],["⏭ Siguiente modo","siguiente"],
+                 ...leerModos().map(m => [`Modo ${m.nombre}`, "modo=" + m.nombre])];
+  $("atajos").innerHTML = lista.map(([t,a]) => `
+    <div style="display:flex;gap:8px;align-items:center;margin:8px 0">
+      <span style="flex:1">${t}</span>
+      <button data-copiar="${a.replace(/"/g,"&quot;")}" style="flex:0 0 auto;padding:10px 14px">Copiar</button>
+    </div>`).join("");
+  $("atajos").querySelectorAll("[data-copiar]").forEach(b => b.onclick = async () => {
+    const url = enlaceAtajo(b.dataset.copiar);
+    try { await navigator.clipboard.writeText(url); b.textContent = "✓ Copiado"; }
+    catch(e) { prompt("Copia este enlace:", url); }
+    setTimeout(() => b.textContent = "Copiar", 2000);
+  });
+}
+const _pintarModos = pintarModos;
+pintarModos = function(){ _pintarModos(); pintarAtajos(); };
+
 pintarControles(); pintarModos(); resolverEnlace();
 </script>
 </body>

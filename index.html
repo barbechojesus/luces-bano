@@ -117,7 +117,20 @@ function detalle(e){
 function log(s){ const l=$("log"); l.textContent = s+"\n"+l.textContent.slice(0,4000); }
 
 // ===== Bluetooth =====
+// Escuchar los anuncios del foco: cuando "habla", es el momento de conectar.
+async function escuchar(f){
+  if (f.escuchando) return;
+  f.escuchando = true;
+  if (!f.dev.watchAdvertisements) { log(`i ${f.nombre}: este navegador no tiene watchAdvertisements`); return; }
+  f.dev.addEventListener("advertisementreceived", ev => {
+    if (!f.ok && !f.conectando) { log(`📡 ${f.nombre} anuncia (rssi ${ev.rssi}) → conecto`); conectar(f, 2); }
+  });
+  try { await f.dev.watchAdvertisements(); log(`i ${f.nombre}: escuchando anuncios`); }
+  catch(e) { log(`i ${f.nombre}: watchAdvertisements falló: ${detalle(e)}`); }
+}
+
 async function conectar(f, intentos = 4){
+  escuchar(f);
   if (f.conectando) return;
   f.conectando = true; pintarFocos();
   for (let i = 1; i <= intentos && !f.ok; i++) {

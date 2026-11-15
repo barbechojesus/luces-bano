@@ -123,9 +123,23 @@ async function conectar(f){
       n.addEventListener("characteristicvaluechanged", e => log(`← ${f.nombre}: ${hex(e.target.value)}`));
     } catch(e) {}
     f.ok = true;
+    modoDesdeEnlace(f);
   } catch(e) { f.ok = false; log(`✗ ${f.nombre}: ${e.message}`); }
   pintarFocos();
 }
+
+// Enlace directo a un modo: …/luces-bano/#modo=Ducha  (para atajos en la pantalla de inicio)
+function modoDesdeEnlace(f){
+  const nombre = decodeURIComponent((location.hash.match(/modo=([^&]+)/) || [])[1] || "");
+  if (!nombre) return;
+  const m = leerModos().find(x => x.nombre.toLowerCase() === nombre.toLowerCase());
+  if (!m) return;
+  Object.assign(estado, m); pintarControles();
+  // se aplica a cada foco según se va conectando
+  const b = estado.on ? [cmd.on(), estado.tipo==="color"?cmd.color(estado.tono):cmd.blanco(estado.kelvin), cmd.brillo(estado.brillo)] : [cmd.off()];
+  b.forEach(x => f.pendiente.set(x[2], x)); bombear(f);
+}
+addEventListener("hashchange", () => focos.filter(f=>f.ok).forEach(modoDesdeEnlace));
 
 function añadirDispositivo(dev){
   if (focos.some(f => f.dev.id === dev.id)) return null;

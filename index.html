@@ -115,7 +115,7 @@ function detalle(e){
   if (typeof e !== "object") return String(e);
   return [e.name, e.message, e.code].filter(x => x !== undefined && x !== "").join(" · ") || JSON.stringify(e) || String(e);
 }
-function log(s){ const l=$("log"); l.textContent = s+"\n"+l.textContent.slice(0,20000); }
+function log(s){ s = new Date().toLocaleTimeString("es-ES") + " " + s; const l=$("log"); l.textContent = s+"\n"+l.textContent.slice(0,20000); }
 
 // ===== Bluetooth =====
 // Escuchar los anuncios del foco: cuando "habla", es el momento de conectar.
@@ -124,28 +124,26 @@ async function escuchar(f){
   f.escuchando = true;
   if (!f.dev.watchAdvertisements) { log(`i ${f.nombre}: este navegador no tiene watchAdvertisements`); return; }
   f.dev.addEventListener("advertisementreceived", ev => {
-    if (!f.ok && !f.conectando) { log(`📡 ${f.nombre} anuncia (rssi ${ev.rssi}) → conecto`); conectar(f, 2); }
+    if (!f.ok && !f.conectando) { log(`📡 ${f.nombre} anuncia (rssi ${ev.rssi}) → conecto`); clearTimeout(f.t); conectar(f); }
   });
   try { await f.dev.watchAdvertisements(); log(`i ${f.nombre}: escuchando anuncios`); }
   catch(e) { log(`i ${f.nombre}: watchAdvertisements falló: ${detalle(e)}`); }
 }
 
-async function conectar(f, intentos = 4){
+async function conectar(f){
   escuchar(f);
-  if (f.conectando) return;
+  if (f.conectando || f.ok) return;
   f.conectando = true; pintarFocos();
-  for (let i = 1; i <= intentos && !f.ok; i++) {
-    try { await conectarUnaVez(f); }
-    catch(e) {
-      log(`✗ ${f.nombre} (intento ${i}): ${detalle(e)}`);
-      try { f.dev.gatt.disconnect(); } catch(_) {}      // soltar una conexión colgada antes de reintentar
-      await new Promise(r => setTimeout(r, 1000 * i));
-    }
+  try { await conectarUnaVez(f); }
+  catch(e) {
+    log(`✗ ${f.nombre}: ${detalle(e)} (espero su anuncio)`);
+    try { f.dev.gatt.disconnect(); } catch(_) {}
   }
   f.conectando = false; pintarFocos();
-  // si no hubo suerte, seguir probando en segundo plano mientras la página esté abierta
-  if (!f.ok) setTimeout(() => conectar(f), 5000);
+  // si no conectó: esperar a su anuncio; por si no llega, otro intento a ciegas en 8 s
+  if (!f.ok) { clearTimeout(f.t); f.t = setTimeout(() => conectar(f), 8000); }
 }
+
 // Cola global: Bluefy lleva mal varias conexiones en curso a la vez, así que van de una en una.
 let colaConexion = Promise.resolve();
 function conectarUnaVez(f){
@@ -188,7 +186,7 @@ function añadirDispositivo(dev){
   const ya = focos.find(f => f.dev.id === dev.id);
   if (ya) return ya;   // ya estaba: lo devolvemos para reconectarlo
   const f = { dev, nombre:`Foco ${focos.length+1}`, ch:null, ok:false, ocupado:false, pendiente:new Map() };
-  dev.addEventListener("gattserverdisconnected", () => { f.ok=false; pintarFocos(); log(`… ${f.nombre} desconectado`); setTimeout(()=>conectar(f), 1500); });
+  dev.addEventListener("gattserverdisconnected", () => { f.ok=false; pintarFocos(); log(`… ${f.nombre} desconectado`); clearTimeout(f.t); f.t = setTimeout(()=>conectar(f), 1500); });
   focos.push(f);
   return f;
 }
@@ -218,7 +216,8 @@ $("btnReconnect").onclick = () => {
       ds.forEach(d => añadirDispositivo(d));
       pintarFocos();
       // de uno en uno: conectar varios a la vez al arrancar suele fallar
-      for (const f of focos) await conectar(f);
+      focos.forEach(f => escuchar(f));
+      focos.forEach((f, i) => { f.t = setTimeout(() => conectar(f), 1500 + i * 1500); });
     } catch(e) { log("getDevices: " + e.message); }
   }
   pintarFocos();

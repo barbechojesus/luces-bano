@@ -74,7 +74,15 @@ function añadirDispositivo(dev){
   f = { dev, nombre:`Foco ${focos.length+1}`, ch:null, ok:false, conectando:false, pendiente:new Map(), ocupado:false };
   dev.addEventListener("gattserverdisconnected", () => { f.ok=false; pintar(); log(`… ${f.nombre} desconectado`); programar(f, 1500); });
   focos.push(f);
+  escuchar(f);
   return f;
+}
+// Android: tras recargar, Chrome solo conecta si antes ha "oído" el anuncio del foco.
+async function escuchar(f){
+  if (f.escuchando || !f.dev.watchAdvertisements) return;
+  f.escuchando = true;
+  f.dev.addEventListener("advertisementreceived", () => { if (!f.ok && !f.conectando) { clearTimeout(f.t); conectar(f); } });
+  try { await f.dev.watchAdvertisements(); } catch(e) { f.escuchando = false; log(`i ${f.nombre}: sin anuncios (${detalle(e)})`); }
 }
 function programar(f, ms){ clearTimeout(f.t); f.t = setTimeout(() => conectar(f), ms); }
 let cola = Promise.resolve();

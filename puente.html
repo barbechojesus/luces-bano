@@ -80,10 +80,24 @@ function añadirDispositivo(dev){
 // Android: tras recargar, Chrome solo conecta si antes ha "oído" el anuncio del foco.
 async function escuchar(f){
   if (f.escuchando || !f.dev.watchAdvertisements) return;
-  f.escuchando = true;
+  f.escuchando = true; f.oyente = true;
   f.dev.addEventListener("advertisementreceived", () => { if (!f.ok && !f.conectando) { clearTimeout(f.t); conectar(f); } });
   try { await f.dev.watchAdvertisements(); } catch(e) { f.escuchando = false; log(`i ${f.nombre}: sin anuncios (${detalle(e)})`); }
 }
+// Si Chrome da el foco por "fuera de alcance", hay que volver a escuchar sus anuncios.
+async function reescuchar(f){
+  if (!f.dev.watchAdvertisements) return;
+  if (f.escuchando && f.dev.watchingAdvertisements) return;
+  if (!f.oyente) { f.oyente = true; f.dev.addEventListener("advertisementreceived", () => { if (!f.ok && !f.conectando) { clearTimeout(f.t); conectar(f); } }); }
+  try { await f.dev.watchAdvertisements(); f.escuchando = true; } catch(e) { f.escuchando = false; }
+}
+// Plan C: si todos los focos llevan 3 minutos desconectados, recargar la página (eso siempre los recupera).
+let sinFocosDesde = null;
+setInterval(() => {
+  if (!focos.length || focos.some(f => f.ok)) { sinFocosDesde = null; return; }
+  sinFocosDesde ??= Date.now();
+  if (Date.now() - sinFocosDesde > 180000) { log("↻ ningún foco en 3 min: recargo"); location.reload(); }
+}, 15000);
 function programar(f, ms){ clearTimeout(f.t); f.t = setTimeout(() => conectar(f), ms); }
 let cola = Promise.resolve();
 function conectar(f){
@@ -99,6 +113,7 @@ function conectar(f){
     } catch(e) {
       log(`✗ ${f.nombre}: ${detalle(e)}`);
       try { f.dev.gatt.disconnect(); } catch(_) {}
+      reescuchar(f);
     }
     f.conectando = false; pintar();
     if (!f.ok) programar(f, 8000);
